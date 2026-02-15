@@ -1,0 +1,105 @@
+workflows:
+  android-workflow:
+    name: Android Production Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      groups:
+        - nutriwalk_production
+      vars:
+        FLUTTER_VERSION: "3.19.0"
+      android_signing:
+        - nutriwalk_keystore
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    
+    scripts:
+      - name: Set up key.properties
+        script: |
+          echo "storePassword=\$KEYSTORE_PASSWORD" > android/key.properties
+          echo "keyPassword=\$KEY_PASSWORD" >> android/key.properties
+          echo "keyAlias=\$KEY_ALIAS" >> android/key.properties
+          echo "storeFile=\$KEYSTORE_PATH" >> android/key.properties
+      
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+      
+      - name: Build Android AAB
+        script: |
+          flutter build appbundle --release \
+            --build-name=1.0.0 \
+            --build-number=$(($(google-play get-latest-build-number --package-name "com.nutriwalk.ai" --tracks=internal) + 1))
+    
+    artifacts:
+      - build/app/outputs/bundle/release/*.aab
+      - build/app/outputs/mapping/release/mapping.txt
+    
+    publishing:
+      email:
+        recipients:
+          - ${RECIPIENT_EMAIL}
+        notify:
+          success: true
+          failure: true
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+        submit_as_draft: true
+
+  ios-workflow:
+    name: iOS Production Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      groups:
+        - nutriwalk_production
+      vars:
+        FLUTTER_VERSION: "3.19.0"
+        XCODE_WORKSPACE: "ios/Runner.xcworkspace"
+        XCODE_SCHEME: "Runner"
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.nutriwalk.ai
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    
+    scripts:
+      - name: Set up code signing settings on Xcode project
+        script: |
+          xcode-project use-profiles
+      
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+      
+      - name: Install pods
+        script: |
+          cd ios && pod install
+      
+      - name: Build iOS IPA
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist \
+            --build-name=1.0.0 \
+            --build-number=$(($(app-store-connect get-latest-build-number) + 1))
+    
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+    
+    publishing:
+      email:
+        recipients:
+          - ${RECIPIENT_EMAIL}
+        notify:
+          success: true
+          failure: true
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_groups:
+          - Internal Testers
